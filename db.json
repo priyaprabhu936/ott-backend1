@@ -1,0 +1,8 @@
+{
+  "users": [],
+  "movies": [
+    { "id": 1, "title": "Vikram", "poster": "https://via.placeholder.com/300x450?text=Vikram" },
+    { "id": 2, "title": "Leo",    "poster": "https://via.placeholder.com/300x450?text=Leo" },
+    { "id": 3, "title": "Jailer", "poster": "https://via.placeholder.com/300x450?text=Jailer" }
+  ]
+}
