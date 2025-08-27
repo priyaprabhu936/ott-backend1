@@ -1,109 +1,78 @@
-// server.js
-require("dotenv").config();
-const express = require("express");
-const cors = require("cors");
-const fs = require("fs");
-const path = require("path");
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
+import express from "express";
+import mongoose from "mongoose";
+import cors from "cors";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
+import dotenv from "dotenv";
 
+dotenv.config();
 const app = express();
-const PORT = process.env.PORT || 10000;
-const JWT_SECRET = process.env.JWT_SECRET || "devsecret-change-it";
-
-// ---- CORS ----
-const FRONTEND_ORIGIN =
-  process.env.FRONTEND_ORIGIN ||
-  "http://localhost:3000,https://*.vercel.app";
-const allowList = FRONTEND_ORIGIN.split(",").map((s) => s.trim());
-
-app.use(
-  cors({
-    origin: function (origin, cb) {
-      if (!origin) return cb(null, true); // Postman/health etc.
-      const ok =
-        allowList.includes("*") ||
-        allowList.includes(origin) ||
-        allowList.some((o) => o.endsWith("*.vercel.app") && origin.endsWith(".vercel.app"));
-      cb(ok ? null : new Error("CORS blocked"), ok);
-    }
-  })
-);
 app.use(express.json());
+app.use(cors());
 
-// ---- DB helpers ----
-const dbPath = path.join(__dirname, "db.json");
-function readDB() {
-  try {
-    return JSON.parse(fs.readFileSync(dbPath, "utf8"));
-  } catch (_) {
-    return { users: [], movies: [] };
-  }
-}
-function writeDB(db) {
-  fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
-}
+mongoose
+  .connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => console.log("✅ MongoDB Connected"))
+  .catch((err) => console.error("❌ Mongo Error:", err));
 
-// ---- Auth middleware ----
-function auth(req, res, next) {
-  const hdr = req.headers.authorization || "";
-  const token = hdr.startsWith("Bearer ") ? hdr.slice(7) : null;
-  if (!token) return res.status(401).json({ message: "No token" });
-  jwt.verify(token, JWT_SECRET, (err, decoded) => {
-    if (err) return res.status(401).json({ message: "Invalid token" });
-    req.user = decoded;
-    next();
-  });
-}
+const userSchema = new mongoose.Schema({
+  username: { type: String, required: true, unique: true },
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+});
 
-// ---- Routes ----
-app.get("/", (_, res) => res.json({ ok: true, service: "ott-backend1" }));
-app.get("/healthz", (_, res) => res.send("ok"));
+const User = mongoose.model("User", userSchema);
 
+// 🔹 Register
 app.post("/register", async (req, res) => {
-  const { username, password } = req.body || {};
-  if (!username || !password)
-    return res.status(400).json({ message: "username & password required" });
+  try {
+    const { username, email, password } = req.body;
 
-  const db = readDB();
-  const exists = db.users.find((u) => u.username === username);
-  if (exists) return res.status(409).json({ message: "User already exists" });
+    if (!username || !email || !password)
+      return res.status(400).json({ message: "All fields required" });
 
-  const hash = await bcrypt.hash(password, 10);
-  const user = { id: Date.now(), username, password: hash };
-  db.users.push(user);
-  writeDB(db);
+    const exist = await User.findOne({ $or: [{ username }, { email }] });
+    if (exist) return res.status(400).json({ message: "User already exists" });
 
-  return res.json({ message: "Registered" });
+    const hashedPass = await bcrypt.hash(password, 10);
+    const newUser = new User({ username, email, password: hashedPass });
+    await newUser.save();
+
+    res.json({ message: "Registered successfully" });
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
 });
 
+// 🔹 Login
 app.post("/login", async (req, res) => {
-  const { username, password } = req.body || {};
-  const db = readDB();
-  const user = db.users.find((u) => u.username === username);
-  if (!user) return res.status(401).json({ message: "Invalid credentials" });
+  try {
+    const { username, password } = req.body;
 
-  const ok = await bcrypt.compare(password, user.password);
-  if (!ok) return res.status(401).json({ message: "Invalid credentials" });
+    const user = await User.findOne({ username });
+    if (!user) return res.status(400).json({ message: "User not found" });
 
-  const token = jwt.sign(
-    { id: user.id, username: user.username },
-    JWT_SECRET,
-    { expiresIn: "7d" }
-  );
-  res.json({ token });
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return res.status(400).json({ message: "Invalid password" });
+
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+      expiresIn: "1h",
+    });
+
+    res.json({ token });
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
 });
 
-app.get("/profile", auth, (req, res) => {
-  res.json({ user: { id: req.user.id, username: req.user.username } });
+// 🔹 Protected Example Route
+app.get("/movies", (req, res) => {
+  res.json([
+    { id: 1, title: "Inception", year: 2010 },
+    { id: 2, title: "Interstellar", year: 2014 },
+    { id: 3, title: "The Dark Knight", year: 2008 },
+  ]);
 });
 
-app.get("/movies", auth, (req, res) => {
-  const db = readDB();
-  res.json({ movies: db.movies });
-});
-
-// ---- Start ----
-app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
-});
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
