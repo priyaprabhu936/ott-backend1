@@ -1,7 +1,7 @@
 {
   "users": [],
   "movies": [
-    { "id": "1", "title": "Inception", "poster": "" },
-    { "id": "2", "title": "Interstellar", "poster": "" }
+    { "id": 1, "title": "Inception", "year": 2010 },
+    { "id": 2, "title": "Interstellar", "year": 2014 }
   ]
 }
