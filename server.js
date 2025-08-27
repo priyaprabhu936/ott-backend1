@@ -1,128 +1,109 @@
 // server.js
+require("dotenv").config();
 const express = require("express");
+const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
-const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
 const app = express();
+const PORT = process.env.PORT || 10000;
+const JWT_SECRET = process.env.JWT_SECRET || "devsecret-change-it";
 
-// ---------- CONFIG ----------
-const PORT = process.env.PORT || 8080;
-const JWT_SECRET = process.env.JWT_SECRET || "super-secret-change-this";
-const DB_PATH = path.join(__dirname, "db.json");
+// ---- CORS ----
+const FRONTEND_ORIGIN =
+  process.env.FRONTEND_ORIGIN ||
+  "http://localhost:3000,https://*.vercel.app";
+const allowList = FRONTEND_ORIGIN.split(",").map((s) => s.trim());
 
-// ---------- MIDDLEWARE ----------
-app.use(express.json());
 app.use(
   cors({
-    origin: [
-      /https?:\/\/.*vercel\.app$/,
-      /https?:\/\/localhost(:\d+)?$/,
-      /https?:\/\/.*onrender\.com$/,
-    ],
-    credentials: true,
+    origin: function (origin, cb) {
+      if (!origin) return cb(null, true); // Postman/health etc.
+      const ok =
+        allowList.includes("*") ||
+        allowList.includes(origin) ||
+        allowList.some((o) => o.endsWith("*.vercel.app") && origin.endsWith(".vercel.app"));
+      cb(ok ? null : new Error("CORS blocked"), ok);
+    }
   })
 );
+app.use(express.json());
 
-// ---------- DB HELPERS ----------
+// ---- DB helpers ----
+const dbPath = path.join(__dirname, "db.json");
 function readDB() {
-  if (!fs.existsSync(DB_PATH)) {
-    fs.writeFileSync(DB_PATH, JSON.stringify({ users: [], movies: [] }, null, 2));
+  try {
+    return JSON.parse(fs.readFileSync(dbPath, "utf8"));
+  } catch (_) {
+    return { users: [], movies: [] };
   }
-  return JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
 }
-function writeDB(data) {
-  fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
+function writeDB(db) {
+  fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
 }
 
-// ---------- AUTH MIDDLEWARE ----------
+// ---- Auth middleware ----
 function auth(req, res, next) {
-  const authHeader = req.headers.authorization || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  const hdr = req.headers.authorization || "";
+  const token = hdr.startsWith("Bearer ") ? hdr.slice(7) : null;
   if (!token) return res.status(401).json({ message: "No token" });
-
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded; // { id, email }
+  jwt.verify(token, JWT_SECRET, (err, decoded) => {
+    if (err) return res.status(401).json({ message: "Invalid token" });
+    req.user = decoded;
     next();
-  } catch (e) {
-    return res.status(401).json({ message: "Invalid token" });
-  }
+  });
 }
 
-// ---------- ROUTES ----------
+// ---- Routes ----
+app.get("/", (_, res) => res.json({ ok: true, service: "ott-backend1" }));
+app.get("/healthz", (_, res) => res.send("ok"));
 
-// Health
-app.get("/", (req, res) => res.json({ ok: true, service: "ott-backend", time: new Date().toISOString() }));
-
-// Register
 app.post("/register", async (req, res) => {
-  try {
-    const { email, password } = req.body || {};
-    if (!email || !password) return res.status(400).json({ message: "Email & password required" });
-
-    const db = readDB();
-    const exists = db.users.find((u) => u.email.toLowerCase() === String(email).toLowerCase());
-    if (exists) return res.status(409).json({ message: "User already exists" });
-
-    const hash = await bcrypt.hash(password, 10);
-    const newUser = { id: Date.now().toString(), email, password: hash };
-    db.users.push(newUser);
-    writeDB(db);
-
-    return res.status(201).json({ message: "Registered successfully" });
-  } catch (e) {
-    console.error(e);
-    return res.status(500).json({ message: "Server error" });
-  }
-});
-
-// Login
-app.post("/login", async (req, res) => {
-  try {
-    const { email, password } = req.body || {};
-    if (!email || !password) return res.status(400).json({ message: "Email & password required" });
-
-    const db = readDB();
-    const user = db.users.find((u) => u.email.toLowerCase() === String(email).toLowerCase());
-    if (!user) return res.status(401).json({ message: "Invalid credentials" });
-
-    const ok = await bcrypt.compare(password, user.password);
-    if (!ok) return res.status(401).json({ message: "Invalid credentials" });
-
-    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: "7d" });
-    return res.json({ token, user: { id: user.id, email: user.email } });
-  } catch (e) {
-    console.error(e);
-    return res.status(500).json({ message: "Server error" });
-  }
-});
-
-// Protected example
-app.get("/profile", auth, (req, res) => {
-  res.json({ message: "Profile ok", user: req.user });
-});
-
-// Movies (public sample)
-app.get("/movies", (req, res) => {
-  const db = readDB();
-  res.json(db.movies || []);
-});
-
-// Add movie (protected)
-app.post("/movies", auth, (req, res) => {
-  const { title, poster } = req.body || {};
-  if (!title) return res.status(400).json({ message: "title required" });
+  const { username, password } = req.body || {};
+  if (!username || !password)
+    return res.status(400).json({ message: "username & password required" });
 
   const db = readDB();
-  const movie = { id: Date.now().toString(), title, poster: poster || "" };
-  db.movies.push(movie);
+  const exists = db.users.find((u) => u.username === username);
+  if (exists) return res.status(409).json({ message: "User already exists" });
+
+  const hash = await bcrypt.hash(password, 10);
+  const user = { id: Date.now(), username, password: hash };
+  db.users.push(user);
   writeDB(db);
-  res.status(201).json(movie);
+
+  return res.json({ message: "Registered" });
 });
 
+app.post("/login", async (req, res) => {
+  const { username, password } = req.body || {};
+  const db = readDB();
+  const user = db.users.find((u) => u.username === username);
+  if (!user) return res.status(401).json({ message: "Invalid credentials" });
+
+  const ok = await bcrypt.compare(password, user.password);
+  if (!ok) return res.status(401).json({ message: "Invalid credentials" });
+
+  const token = jwt.sign(
+    { id: user.id, username: user.username },
+    JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+  res.json({ token });
+});
+
+app.get("/profile", auth, (req, res) => {
+  res.json({ user: { id: req.user.id, username: req.user.username } });
+});
+
+app.get("/movies", auth, (req, res) => {
+  const db = readDB();
+  res.json({ movies: db.movies });
+});
+
+// ---- Start ----
 app.listen(PORT, () => {
-  console.log(`Server listening on ${PORT}`);
+  console.log("Server running on port", PORT);
 });
