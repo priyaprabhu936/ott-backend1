@@ -1,78 +1,66 @@
-import express from "express";
-import mongoose from "mongoose";
-import cors from "cors";
-import jwt from "jsonwebtoken";
-import bcrypt from "bcryptjs";
-import dotenv from "dotenv";
+const express = require("express");
+const mongoose = require("mongoose");
+const cors = require("cors");
+const bodyParser = require("body-parser");
 
-dotenv.config();
 const app = express();
-app.use(express.json());
+const PORT = process.env.PORT || 10000;
+
+// Middleware
 app.use(cors());
+app.use(bodyParser.json());
 
+// ✅ MongoDB Connection
 mongoose
-  .connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
-  .then(() => console.log("✅ MongoDB Connected"))
-  .catch((err) => console.error("❌ Mongo Error:", err));
+  .connect("mongodb+srv://admin:db_admin123@cluster0.1ss7sxa.mongodb.net/ottDB", {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
+  .then(() => console.log("✅ MongoDB connected"))
+  .catch((err) => console.error("❌ MongoDB connection error:", err));
 
+// ✅ User Schema
 const userSchema = new mongoose.Schema({
-  username: { type: String, required: true, unique: true },
-  email: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
+  username: String,
+  email: String,
+  password: String,
 });
 
 const User = mongoose.model("User", userSchema);
 
-// 🔹 Register
+// ✅ Register Route
 app.post("/register", async (req, res) => {
   try {
     const { username, email, password } = req.body;
-
-    if (!username || !email || !password)
-      return res.status(400).json({ message: "All fields required" });
-
-    const exist = await User.findOne({ $or: [{ username }, { email }] });
-    if (exist) return res.status(400).json({ message: "User already exists" });
-
-    const hashedPass = await bcrypt.hash(password, 10);
-    const newUser = new User({ username, email, password: hashedPass });
-    await newUser.save();
-
-    res.json({ message: "Registered successfully" });
+    const user = new User({ username, email, password });
+    await user.save();
+    res.status(201).json({ message: "User registered successfully ✅" });
   } catch (err) {
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ error: "Failed to register user ❌" });
   }
 });
 
-// 🔹 Login
+// ✅ Login Route
 app.post("/login", async (req, res) => {
   try {
-    const { username, password } = req.body;
-
-    const user = await User.findOne({ username });
-    if (!user) return res.status(400).json({ message: "User not found" });
-
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ message: "Invalid password" });
-
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
-      expiresIn: "1h",
-    });
-
-    res.json({ token });
+    const { email, password } = req.body;
+    const user = await User.findOne({ email, password });
+    if (user) {
+      res.json({ message: "Login successful ✅" });
+    } else {
+      res.status(401).json({ error: "Invalid email or password ❌" });
+    }
   } catch (err) {
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ error: "Login failed ❌" });
   }
 });
 
-// 🔹 Protected Example Route
-app.get("/movies", (req, res) => {
-  res.json([
-    { id: 1, title: "Inception", year: 2010 },
-    { id: 2, title: "Interstellar", year: 2014 },
-    { id: 3, title: "The Dark Knight", year: 2008 },
-  ]);
+// ✅ Root Route
+app.get("/", (req, res) => {
+  res.send("🚀 Backend is running!");
 });
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+// ✅ Start Server
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
